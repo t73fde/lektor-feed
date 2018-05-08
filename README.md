@@ -4,6 +4,12 @@ Builds one or more Atom XML feeds or RSS XML feeds for your [Lektor](https://www
 
 Inspired by the [atom-feed-support](https://github.com/lektor/lektor-website/tree/master/packages/atom-feed-support) plugin Armin Ronacher wrote for the Lektor official blog.
 
+Atom and RSS feed plugin for Lektor. This plugin is based on lektor-atom, but
+enhances it in several ways.
+
+* Support for generating RSS feeds too (planned)
+* Same IDs even if generated on different computers
+
 ## Installation
 
 Add lektor-feed to your project from command line:
