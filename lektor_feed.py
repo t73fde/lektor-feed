@@ -3,6 +3,7 @@ import hashlib
 import uuid
 from datetime import datetime, date
 
+import click
 import pkg_resources
 from lektor.build_programs import BuildProgram
 from lektor.db import F
@@ -12,8 +13,9 @@ from lektor.context import get_ctx, url_to
 from lektor.sourceobj import VirtualSourceObject
 from lektor.utils import build_url
 
-from werkzeug.contrib.atom import AtomFeed
 from markupsafe import escape
+
+from werkzeug_atom import AtomFeed
 
 
 class AtomFeedSource(VirtualSourceObject):
@@ -42,8 +44,8 @@ class AtomFeedSource(VirtualSourceObject):
 
     @property
     def feed_name(self):
-        return self.plugin.get_feed_config(self.feed_id, 'name') or \
-            self.feed_id
+        return self.plugin.get_feed_config(self.feed_id, 'name') \
+            or self.feed_id
 
 
 def get(item, field, default=None):
@@ -53,7 +55,8 @@ def get(item, field, default=None):
 
 
 def get_id(s):
-    return uuid.UUID(bytes=hashlib.md5(s).digest(), version=3).urn
+    return uuid.UUID(
+        bytes=hashlib.md5(s.encode('utf-8')).digest(), version=3).urn
 
 
 def get_item_title(item, field):
@@ -66,7 +69,7 @@ def get_item_body(item, field):
     if field not in item:
         raise RuntimeError('Body field %r not found in %r' % (field, item))
     with get_ctx().changed_base_url(item.url_path):
-        return unicode(escape(item[field]))
+        return str(escape(item[field]))
 
 
 def get_item_updated(item, field):
@@ -91,10 +94,14 @@ class AtomFeedBuilderProgram(BuildProgram):
         blog = feed_source.parent
 
         summary = get(blog, feed_source.blog_summary_field) or ''
-        subtitle_type = ('html' if hasattr(summary, '__html__') else 'text')
-        blog_author = unicode(get(blog, feed_source.blog_author_field) or '')
+        if hasattr(summary, '__html__'):
+            subtitle_type = 'html'
+            summary = str(summary.__html__())
+        else:
+            subtitle_type = 'text'
+        blog_author = str(get(blog, feed_source.blog_author_field) or '')
         generator = ('Lektor Feed Plugin',
-                     'https://yoyod.de/p/lektor-feed',
+                     'https://github.com/t73fde/lektor-feed',
                      pkg_resources.get_distribution('lektor-feed').version)
 
         project_id = ctx.env.load_config().base_url
@@ -102,7 +109,7 @@ class AtomFeedBuilderProgram(BuildProgram):
             project_id = ctx.env.project.id
         feed = AtomFeed(
             title=feed_source.feed_name,
-            subtitle=unicode(summary),
+            subtitle=summary,
             subtitle_type=subtitle_type,
             author=blog_author,
             feed_url=url_to(feed_source, external=True),
@@ -124,20 +131,25 @@ class AtomFeedBuilderProgram(BuildProgram):
         items = items.order_by(order_by).limit(int(feed_source.limit))
 
         for item in items:
-            item_author_field = feed_source.item_author_field
-            item_author = get(item, item_author_field) or blog_author
+            try:
+                item_author_field = feed_source.item_author_field
+                item_author = get(item, item_author_field) or blog_author
 
-            feed.add(
-                get_item_title(item, feed_source.item_title_field),
-                get_item_body(item, feed_source.item_body_field),
-                xml_base=url_to(item, external=True),
-                url=url_to(item, external=True),
-                content_type='html',
-                id=get_id(u'%s/%s' % (
-                    project_id,
-                    item['_path'].encode('utf-8'))),
-                author=item_author,
-                updated=get_item_updated(item, feed_source.item_date_field))
+                feed.add(
+                    get_item_title(item, feed_source.item_title_field),
+                    get_item_body(item, feed_source.item_body_field),
+                    xml_base=url_to(item, external=True),
+                    url=url_to(item, external=True),
+                    content_type='html',
+                    id=get_id(u'%s/%s' % (
+                        ctx.env.project.id,
+                        item['_path'].encode('utf-8'))),
+                    author=item_author,
+                    updated=get_item_updated(
+                        item, feed_source.item_date_field))
+            except Exception as exc:
+                msg = '%s: %s' % (item['_id'], exc)
+                click.echo(click.style('E', fg='red') + ' ' + msg)
 
         with artifact.open('wb') as f:
             f.write(feed.to_string().encode('utf-8'))
@@ -145,6 +157,7 @@ class AtomFeedBuilderProgram(BuildProgram):
 
 class FeedPlugin(Plugin):
     name = u'Lektor Feed plugin'
+    description = u'Lektor plugin that generates Atom feeds.'
 
     defaults = {
         'source_path': '/',
